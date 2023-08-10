@@ -100,6 +100,7 @@ public:
         resetParameters();
 
         pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
+        ROS_INFO_STREAM("Test");
     }
 
     void allocateMemory()

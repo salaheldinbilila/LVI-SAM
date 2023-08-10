@@ -1,0 +1,21 @@
+<launch>
+
+    <arg name="project" default="lvi_sam"/>
+    <rosparam file="$(find lvi_sam)/config/params_navsat.yaml" command="load" />
+    
+    <!-- EKF GPS-->
+    <node pkg="robot_localization" type="ekf_localization_node" name="ekf_gps" respawn="true">
+        <remap from="odometry/filtered" to="odometry/navsat" />
+    </node>
+
+    <!-- Navsat -->
+    <node pkg="robot_localization" type="navsat_transform_node" name="navsat" respawn="true">
+        <!-- <rosparam param="datum">[42.35893211, -71.09345588, 0.0, world, base_link]</rosparam> -->
+        <remap from="imu/data" to="imu/data" />
+        <remap from="gps/fix" to="fix_corrected" />
+        <remap from="odometry/filtered" to="odometry/navsat" />
+    </node>
+
+    <node pkg="munnrc_payload_driver" type="munnrc_payload_frame_change" name="navsat_frame_change" respawn="true"/>
+
+</launch>

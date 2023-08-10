@@ -1,5 +1,6 @@
 #pragma once
 
+
 #include <ros/ros.h>
 #include <ros/package.h>
 #include <opencv2/highgui/highgui.hpp>
@@ -15,6 +16,9 @@
 
 #include <opencv/cv.h>
 #include <cv_bridge/cv_bridge.h>
+#include <eigen3/Eigen/Dense>
+#include <opencv2/core/eigen.hpp>
+
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -70,6 +74,7 @@ extern std::string IMU_TOPIC;
 extern std::string POINT_CLOUD_TOPIC;
 
 extern int USE_LIDAR;
+extern int USE_DENSE_CLOUD;
 extern int LIDAR_SKIP;
 
 extern std::string FISHEYE_MASK;
@@ -91,6 +96,8 @@ extern double L_C_TZ;
 extern double L_C_RX;
 extern double L_C_RY;
 extern double L_C_RZ;
+
+
 
 
 void readParameters(ros::NodeHandle &n);

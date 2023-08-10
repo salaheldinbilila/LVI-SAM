@@ -70,6 +70,8 @@ extern double GYR_N, GYR_W;
 
 extern std::vector<Eigen::Matrix3d> RIC;
 extern std::vector<Eigen::Vector3d> TIC;
+extern std::vector<Eigen::Matrix3d> RCL;
+extern std::vector<Eigen::Vector3d> TCL;
 extern Eigen::Vector3d G;
 
 extern double BIAS_ACC_THRESHOLD;
@@ -86,6 +88,7 @@ extern int ROLLING_SHUTTER;
 extern double ROW, COL;
 
 extern int USE_LIDAR;
+extern int USE_DENSE_CLOUD;
 extern int ALIGN_CAMERA_LIDAR_COORDINATE;
 
 void readParameters(ros::NodeHandle &n);

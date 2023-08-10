@@ -9,6 +9,8 @@ double GYR_N, GYR_W;
 
 std::vector<Eigen::Matrix3d> RIC;
 std::vector<Eigen::Vector3d> TIC;
+std::vector<Eigen::Matrix3d> RCL;
+std::vector<Eigen::Vector3d> TCL;
 
 Eigen::Vector3d G{0.0, 0.0, 9.8};
 
@@ -25,6 +27,7 @@ double ROW, COL;
 double TD, TR;
 
 int USE_LIDAR;
+int USE_DENSE_CLOUD;
 int ALIGN_CAMERA_LIDAR_COORDINATE;
 
 
@@ -44,6 +47,7 @@ void readParameters(ros::NodeHandle &n)
     fsSettings["imu_topic"] >> IMU_TOPIC;
 
     fsSettings["use_lidar"] >> USE_LIDAR;
+    fsSettings["use_dense_cloud"] >> USE_DENSE_CLOUD;
     fsSettings["align_camera_lidar_estimation"] >> ALIGN_CAMERA_LIDAR_COORDINATE;
 
     SOLVER_TIME = fsSettings["max_solver_time"];
@@ -91,8 +95,23 @@ void readParameters(ros::NodeHandle &n)
         RIC.push_back(eigen_R);
         TIC.push_back(eigen_T);
         ROS_INFO_STREAM("Extrinsic_R : " << std::endl << RIC[0]);
-        ROS_INFO_STREAM("Extrinsic_T : " << std::endl << TIC[0].transpose());
+        ROS_INFO_STREAM("Extrinsic_t : " << std::endl << TIC[0].transpose());
         
+        cv::Mat cv_R2, cv_T2;
+	fsSettings["extrinsicRotationLidar"] >> cv_R2;
+        fsSettings["extrinsicTranslationLidar"] >> cv_T2;       
+	Eigen::Matrix3d eigen_R2;
+        Eigen::Vector3d eigen_T2;	
+	cv::cv2eigen(cv_R2, eigen_R2);
+        cv::cv2eigen(cv_T2, eigen_T2);
+        Eigen::Quaterniond Q2(eigen_R2);
+        eigen_R2 = Q2.normalized();
+        RCL.push_back(eigen_R2);
+        TCL.push_back(eigen_T2);
+        ROS_INFO_STREAM("Extrinsic_R : " << std::endl << RCL[0]);
+        ROS_INFO_STREAM("Extrinsic_T : " << std::endl << TCL[0].transpose());
+       
+
     } 
 
     INIT_DEPTH = 5.0;

@@ -40,6 +40,9 @@ void registerPub(ros::NodeHandle &n)
     keyframebasevisual.setLineWidth(0.01);
 }
 
+
+
+
 tf::Transform transformConversion(const tf::StampedTransform& t)
 {
     double xCur, yCur, zCur, rollCur, pitchCur, yawCur;
@@ -49,6 +52,23 @@ tf::Transform transformConversion(const tf::StampedTransform& t)
     tf::Matrix3x3 m(t.getRotation());
     m.getRPY(rollCur, pitchCur, yawCur);
     return tf::Transform(tf::createQuaternionFromRPY(rollCur, pitchCur, yawCur), tf::Vector3(xCur, yCur, zCur));;
+}
+
+Eigen::Matrix4d fromTfTtoEigenT(const tf::Transform& t){
+    Eigen::Matrix4d e;
+    for(int i=0; i<3; i++)
+     {
+	e.matrix()(i,3) = t.getOrigin()[i];
+	for(int j=0; j<3; j++)
+	{
+		e.matrix()(i,j) = t.getBasis()[i][j];
+        }
+     }
+	// Fill in identity in last row
+     for (int col = 0 ; col < 3; col ++)
+	e.matrix()(3, col) = 0;
+     e.matrix()(3,3) = 1;
+     return e;
 }
 
 void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, const Eigen::Vector3d &V, const std_msgs::Header &header, const int& failureId)
@@ -81,16 +101,83 @@ void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, co
     // imu odometry in ROS format (change rotation), used for lidar odometry initial guess
     odometry.pose.covariance[0] = double(failureId); // notify lidar odometry failure
 
+   /*
     tf::Quaternion q_odom_cam(Q.x(), Q.y(), Q.z(), Q.w());
     tf::Quaternion q_cam_to_lidar(0, 1, 0, 0); // mark: camera - lidar
     tf::Quaternion q_odom_ros = q_odom_cam * q_cam_to_lidar;
     tf::quaternionTFToMsg(q_odom_ros, odometry.pose.pose.orientation);
     pub_latest_odometry_ros.publish(odometry);
-
+    
     // TF of camera in vins_world in ROS format (change rotation), used for depth registration
     tf::Transform t_w_body = tf::Transform(q_odom_ros, tf::Vector3(P.x(), P.y(), P.z()));
     tf::StampedTransform trans_world_vinsbody_ros = tf::StampedTransform(t_w_body, header.stamp, "vins_world", "vins_body_ros");
     br.sendTransform(trans_world_vinsbody_ros);
+    ROS_INFO_STREAM("Tmat_VW_LB in viz check: " << fromTfTtoEigenT(t_w_body));
+    */
+    //ROS_INFO_STREAM("Extrinsic_R in viz: " << std::endl << RCL[0]);
+    //ROS_INFO_STREAM("Extrinsic_T in viz: " << std::endl << TCL[0].transpose());
+    
+    //Oscar - taking tCL and RCL from cfg files
+    //Get T_VW_VB : VW: vinsworld, VB: vins body(imu)
+    Eigen::Matrix4d Tmat_VW_VB;   
+    Tmat_VW_VB.setIdentity();
+    Tmat_VW_VB.block<3,3>(0,0) = Q.toRotationMatrix();
+    Tmat_VW_VB.block<3,1>(0,3) = P;
+
+    //Get T_I_L = T_I_C*T_C_L
+    Eigen::Matrix4d Tmat_IC;
+    Tmat_IC.setIdentity();   // Set to Identity to make bottom row of Matrix 0,0,0,1
+    Tmat_IC.block<3,3>(0,0) = RIC[0];
+    Tmat_IC.block<3,1>(0,3) = TIC[0];
+    
+    Eigen::Matrix4d Tmat_CL;
+    Tmat_CL.setIdentity();   // Set to Identity to make bottom row of Matrix 0,0,0,1
+    Tmat_CL.block<3,3>(0,0) = RCL[0];
+    Tmat_CL.block<3,1>(0,3) = TCL[0];
+
+    Eigen::Matrix4d Tmat_IL = Tmat_IC * Tmat_CL;
+   
+    //Find T_VW_LB = T_VW_VB*T_I_L
+    Eigen::Matrix4d Tmat_VW_LB = Tmat_VW_VB * Tmat_IL;   
+ 
+    //publish Odometery
+    Eigen::Quaterniond tempQ(Tmat_VW_LB.block<3,3>(0,0));
+    odometry.pose.pose.position.x = Tmat_VW_LB.matrix()(0,3);
+    odometry.pose.pose.position.y = Tmat_VW_LB.matrix()(1,3);
+    odometry.pose.pose.position.z = Tmat_VW_LB.matrix()(2,3);
+    odometry.pose.pose.orientation.x = tempQ.x();
+    odometry.pose.pose.orientation.y = tempQ.y();
+    odometry.pose.pose.orientation.z = tempQ.z();
+    odometry.pose.pose.orientation.w = tempQ.w();
+    pub_latest_odometry_ros.publish(odometry);
+
+    //publish the frame
+    tf::Quaternion tempQtf(tempQ.x(), tempQ.y(), tempQ.z(), tempQ.w());
+    tf::Transform t_w_body = tf::Transform(tempQtf, tf::Vector3(Tmat_VW_LB.matrix()(0,3), Tmat_VW_LB.matrix()(1,3), Tmat_VW_LB.matrix()(2,3)));
+    tf::StampedTransform trans_world_vinsbody_ros = tf::StampedTransform(t_w_body, header.stamp, "vins_world", "vins_body_ros");
+    br.sendTransform(trans_world_vinsbody_ros);
+
+    /*transform.setOrigin(tf::Vector3(correct_t(0), correct_t(1), correct_t(2)));
+    q.setW(correct_q.w());
+    q.setX(correct_q.x());
+    q.setY(correct_q.y());
+    q.setZ(correct_q.z());
+    transform.setRotation(q);*/
+
+    //ROS_INFO_STREAM("Extrinsic_T_VW_VB in viz: " << eTmat_VW_VB);
+    //ROS_INFO_STREAM("Tmat_VW_LB in viz: " << Tmat_VW_LB);
+    //ROS_INFO_STREAM("Extrinsic_T_IC in viz: " << Tmat_IL);//ok
+    //ROS_INFO_STREAM("Extrinsic_T_IC in viz: " << eTmat_I_C.rotation());
+        
+
+    
+    
+
+    
+
+    
+
+
 
     if (ALIGN_CAMERA_LIDAR_COORDINATE)
     {
@@ -125,8 +212,8 @@ void printStatistics(const Estimator &estimator, double t)
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         //ROS_DEBUG("calibration result for camera %d", i);
-        ROS_DEBUG_STREAM("extirnsic tic: " << estimator.tic[i].transpose());
-        ROS_DEBUG_STREAM("extrinsic ric: " << Utility::R2ypr(estimator.ric[i]).transpose());
+        //ROS_DEBUG_STREAM("extirnsic tic: " << estimator.tic[i].transpose());
+        //ROS_DEBUG_STREAM("extrinsic ric: " << Utility::R2ypr(estimator.ric[i]).transpose());
         if (ESTIMATE_EXTRINSIC)
         {
             cv::FileStorage fs(EX_CALIB_RESULT_PATH, cv::FileStorage::WRITE);

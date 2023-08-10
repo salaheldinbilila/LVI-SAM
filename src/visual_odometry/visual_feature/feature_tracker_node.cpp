@@ -8,6 +8,7 @@ std::mutex mtx_lidar;
 
 // global variable for saving the depthCloud shared between two threads
 pcl::PointCloud<PointType>::Ptr depthCloud(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr depthCloudLocal(new pcl::PointCloud<PointType>());
 
 // global variables saving the lidar point cloud
 deque<pcl::PointCloud<PointType>> cloudQueue;
@@ -170,8 +171,14 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         // get feature depth from lidar point cloud
         pcl::PointCloud<PointType>::Ptr depth_cloud_temp(new pcl::PointCloud<PointType>());
         mtx_lidar.lock();
-        *depth_cloud_temp = *depthCloud;
-        mtx_lidar.unlock();
+	/*if(USE_DENSE_CLOUD ==0){
+		*depth_cloud_temp = *depthCloudLocal;	
+	}
+	else{        
+		*depth_cloud_temp = *depthCloud;
+	}*/ //not working
+	*depth_cloud_temp = *depthCloud;
+	mtx_lidar.unlock();
 
         sensor_msgs::ChannelFloat32 depth_of_points = depthRegister->get_depth(img_msg->header.stamp, show_img, depth_cloud_temp, trackerData[0].m_camera, feature_points->points);
         feature_points->channels.push_back(depth_of_points);
@@ -221,6 +228,50 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
     }
 }
 
+void lidar_raw_callback(const sensor_msgs::PointCloud2ConstPtr& laser_msg)
+{
+    static int lidar_count = -1;
+    if (++lidar_count % (LIDAR_SKIP+1) != 0)
+        return;
+
+   //TODO: 1. convert Lidar to camera frame using configuration T_CL
+   //1.1 convert point cloud to PCL
+   pcl::PointCloud<PointType>::Ptr laser_cloud_in(new pcl::PointCloud<PointType>());
+   pcl::fromROSMsg(*laser_msg, *laser_cloud_in);
+   pcl::PointCloud<PointType>::Ptr laser_cloud_in_ds(new pcl::PointCloud<PointType>());
+   
+   //1.2 Downsample point cloud
+   static pcl::VoxelGrid<PointType> downSizeFilter;
+   downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
+   downSizeFilter.setInputCloud(laser_cloud_in);
+   downSizeFilter.filter(*laser_cloud_in_ds);
+   *laser_cloud_in = *laser_cloud_in_ds;
+   
+   //1.3. filter lidar points (only keep points in camera view)
+    pcl::PointCloud<PointType>::Ptr laser_cloud_in_filter(new pcl::PointCloud<PointType>());
+    for (int i = 0; i < (int)laser_cloud_in->size(); ++i)
+    {
+        PointType p = laser_cloud_in->points[i];
+        if (p.x >= 0 && abs(p.y / p.x) <= 10 && abs(p.z / p.x) <= 10)
+            laser_cloud_in_filter->push_back(p);
+    }
+    *laser_cloud_in = *laser_cloud_in_filter;
+    
+    // Transform to Camera frame
+    pcl::PointCloud<PointType>::Ptr laser_cloud_offset(new pcl::PointCloud<PointType>());
+   // ROS_INFO_STREAM("Extrinsic_R in depth image: " << std::endl << RCL[0]);
+    //ROS_INFO_STREAM("Extrinsic_t in depth image: " << std::endl << TCL[0].transpose());
+
+    //Eigen::Affine3f transOffset = pcl::getTransformation(L_C_TX, L_C_TY, L_C_TZ, L_C_RX, L_C_RY, L_C_RZ);
+    //pcl::transformPointCloud(*laser_cloud_in, *laser_cloud_offset, transOffset);
+    //*laser_cloud_in = *laser_cloud_offset;
+
+   //TODO: 2. save it to a global cloud
+
+   //TODO: in image call back project the points to the image using the camera model and publish an image    
+
+
+}
 
 void lidar_callback(const sensor_msgs::PointCloud2ConstPtr& laser_msg)
 {
@@ -285,6 +336,7 @@ void lidar_callback(const sensor_msgs::PointCloud2ConstPtr& laser_msg)
     double timeScanCur = laser_msg->header.stamp.toSec();
     cloudQueue.push_back(*laser_cloud_global);
     timeQueue.push_back(timeScanCur);
+    *depthCloudLocal = *laser_cloud_in;
 
     // 7. pop old cloud
     while (!timeQueue.empty())
@@ -297,12 +349,17 @@ void lidar_callback(const sensor_msgs::PointCloud2ConstPtr& laser_msg)
             break;
         }
     }
-
+    
     std::lock_guard<std::mutex> lock(mtx_lidar);
+    
     // 8. fuse global cloud
     depthCloud->clear();
-    for (int i = 0; i < (int)cloudQueue.size(); ++i)
-        *depthCloud += cloudQueue[i];
+    if (USE_DENSE_CLOUD == 0){
+    	*depthCloud += cloudQueue.back();
+    }else {
+    	for (int i = 0; i < (int)cloudQueue.size(); ++i)
+        	*depthCloud += cloudQueue[i];
+    }
 
     // 9. downsample global cloud
     pcl::PointCloud<PointType>::Ptr depthCloudDS(new pcl::PointCloud<PointType>());
@@ -347,6 +404,7 @@ int main(int argc, char **argv)
     // subscriber to image and lidar
     ros::Subscriber sub_img   = n.subscribe(IMAGE_TOPIC,       5,    img_callback);
     ros::Subscriber sub_lidar = n.subscribe(POINT_CLOUD_TOPIC, 5,    lidar_callback);
+    //ros::Subscriber sub_lidar_raw = n.subscribe("/velodyne_points", 5,    lidar_raw_callback);
     if (!USE_LIDAR)
         sub_lidar.shutdown();
 

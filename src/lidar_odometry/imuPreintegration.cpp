@@ -338,7 +338,7 @@ public:
     {
         sensor_msgs::Imu thisImu = imuConverter(*imuMsg);
         // publish static tf
-        tfMap2Odom.sendTransform(tf::StampedTransform(map_to_odom, thisImu.header.stamp, "map", "odom"));
+        //tfMap2Odom.sendTransform(tf::StampedTransform(map_to_odom, thisImu.header.stamp, "map", "odom"));
 
         imuQueOpt.push_back(thisImu);
         imuQueImu.push_back(thisImu);

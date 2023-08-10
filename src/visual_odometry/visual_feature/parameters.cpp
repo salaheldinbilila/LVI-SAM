@@ -28,7 +28,10 @@ double L_C_RX;
 double L_C_RY;
 double L_C_RZ;
 
+
+
 int USE_LIDAR;
+int USE_DENSE_CLOUD;
 int LIDAR_SKIP;
 
 
@@ -53,6 +56,7 @@ void readParameters(ros::NodeHandle &n)
 
     // lidar configurations
     fsSettings["use_lidar"] >> USE_LIDAR;
+    fsSettings["use_dense_cloud"] >> USE_DENSE_CLOUD;
     fsSettings["lidar_skip"] >> LIDAR_SKIP;
 
     // feature and image settings
@@ -71,6 +75,7 @@ void readParameters(ros::NodeHandle &n)
     L_C_RX = fsSettings["lidar_to_cam_rx"];
     L_C_RY = fsSettings["lidar_to_cam_ry"];
     L_C_RZ = fsSettings["lidar_to_cam_rz"];
+
 
     // fisheye mask
     FISHEYE = fsSettings["fisheye"];

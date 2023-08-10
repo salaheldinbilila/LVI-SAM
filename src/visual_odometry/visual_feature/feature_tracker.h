@@ -128,6 +128,11 @@ public:
 
         // 0.4 transform cloud from global frame to camera frame
         pcl::PointCloud<PointType>::Ptr depth_cloud_local(new pcl::PointCloud<PointType>());
+        /*if(USE_DENSE_CLOUD ==0) //the local cloud is sent already when this flag is disbled
+	{	*depth_cloud_local = *depthCloud;}
+	else{
+        	pcl::transformPointCloud(*depthCloud, *depth_cloud_local, transNow.inverse());
+	}*/
         pcl::transformPointCloud(*depthCloud, *depth_cloud_local, transNow.inverse());
 
         // 0.5 project undistorted normalized (z) 2d features onto a unit sphere

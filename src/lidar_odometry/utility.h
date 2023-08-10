@@ -79,6 +79,7 @@ public:
     bool useGpsElevation;
     float gpsCovThreshold;
     float poseCovThreshold;
+    float ImuHeadingBias;
 
     // Save pcd
     bool savePCD;
@@ -156,6 +157,7 @@ public:
         nh.param<bool>(PROJECT_NAME + "/useGpsElevation", useGpsElevation, false);
         nh.param<float>(PROJECT_NAME + "/gpsCovThreshold", gpsCovThreshold, 2.0);
         nh.param<float>(PROJECT_NAME + "/poseCovThreshold", poseCovThreshold, 25.0);
+        nh.param<float>(PROJECT_NAME + "/ImuHeadingBias", ImuHeadingBias, 0.0);   
 
         nh.param<bool>(PROJECT_NAME + "/savePCD", savePCD, false);
         nh.param<std::string>(PROJECT_NAME + "/savePCDDirectory", savePCDDirectory, "/tmp/loam/");
@@ -177,6 +179,7 @@ public:
         extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);
         extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);
         extQRPY = Eigen::Quaterniond(extRPY);
+	ROS_INFO_STREAM("imu to lidar rotation: "<< extRot);
 
         nh.param<float>(PROJECT_NAME + "/edgeThreshold", edgeThreshold, 0.1);
         nh.param<float>(PROJECT_NAME + "/surfThreshold", surfThreshold, 0.1);

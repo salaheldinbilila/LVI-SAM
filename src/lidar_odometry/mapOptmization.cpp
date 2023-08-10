@@ -15,6 +15,7 @@
 #include <gtsam/inference/Symbol.h>
 
 #include <gtsam/nonlinear/ISAM2.h>
+#include "LocalCartesian.hpp"
 
 using namespace gtsam;
 
@@ -59,10 +60,16 @@ public:
     Values isamCurrentEstimate;
     Eigen::MatrixXd poseCovariance;
 
+    // kept for GPS world frame coarrecrion
+    Eigen::Matrix4d WGPS_T_WLVI = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d WGPS_T_WLVI_viz = Eigen::Matrix4d::Identity();
+
     ros::Publisher pubLaserCloudSurround;
     ros::Publisher pubOdomAftMappedROS;
     ros::Publisher pubKeyPoses;
     ros::Publisher pubPath;
+    ros::Publisher pubGPSPath;
+    ros::Publisher pubGPSOdom;
 
     ros::Publisher pubHistoryKeyFrames;
     ros::Publisher pubIcpKeyFrames;
@@ -75,7 +82,8 @@ public:
     ros::Subscriber subGPS;
     ros::Subscriber subLoopInfo;
 
-    std::deque<nav_msgs::Odometry> gpsQueue;
+    //std::deque<nav_msgs::Odometry> gpsQueue;
+    std::deque<sensor_msgs::NavSatFix> gpsQueue;
     lvi_sam::cloud_info cloudInfo;
 
     vector<pcl::PointCloud<PointType>::Ptr> cornerCloudKeyFrames;
@@ -133,8 +141,12 @@ public:
 
     bool aLoopIsClosed = false;
     int imuPreintegrationResetId = 0;
+  
+    bool initGPS = false;
+    GeographicLib::LocalCartesian geoConverter;
 
     nav_msgs::Path globalPath;
+    nav_msgs::Path GPSPath;
 
     Eigen::Affine3f transPointAssociateToMap;
 
@@ -154,9 +166,12 @@ public:
         pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>(PROJECT_NAME + "/lidar/mapping/map_global", 1);
         pubOdomAftMappedROS   = nh.advertise<nav_msgs::Odometry>      (PROJECT_NAME + "/lidar/mapping/odometry", 1);
         pubPath               = nh.advertise<nav_msgs::Path>          (PROJECT_NAME + "/lidar/mapping/path", 1);
+        pubGPSPath            = nh.advertise<nav_msgs::Path>          (PROJECT_NAME + "/GPS/GPSpath", 1);
+        pubGPSOdom            = nh.advertise<nav_msgs::Odometry>      (PROJECT_NAME + "/GPS/GPSodometry", 1);
 
         subLaserCloudInfo     = nh.subscribe<lvi_sam::cloud_info>     (PROJECT_NAME + "/lidar/feature/cloud_info", 5, &mapOptimization::laserCloudInfoHandler, this, ros::TransportHints().tcpNoDelay());
-        subGPS                = nh.subscribe<nav_msgs::Odometry>      (gpsTopic,                                   50, &mapOptimization::gpsHandler, this, ros::TransportHints().tcpNoDelay());
+        //subGPS                = nh.subscribe<nav_msgs::Odometry>      (gpsTopic,                                   50, &mapOptimization::gpsHandler, this, ros::TransportHints().tcpNoDelay());
+        subGPS                = nh.subscribe<sensor_msgs::NavSatFix>      (gpsTopic,                                   50, &mapOptimization::gpsHandler, this, ros::TransportHints().tcpNoDelay());
         subLoopInfo           = nh.subscribe<std_msgs::Float64MultiArray>(PROJECT_NAME + "/vins/loop/match_frame", 5, &mapOptimization::loopHandler, this, ros::TransportHints().tcpNoDelay());
 
         pubHistoryKeyFrames   = nh.advertise<sensor_msgs::PointCloud2>(PROJECT_NAME + "/lidar/mapping/loop_closure_history_cloud", 1);
@@ -254,11 +269,21 @@ public:
             publishFrames();
         }
     }
-
-    void gpsHandler(const nav_msgs::Odometry::ConstPtr& gpsMsg)
+    
+    // uncomment this if the navsat driver needs to be used
+    /*void gpsHandler(const nav_msgs::Odometry::ConstPtr& gpsMsg)
     {
         std::lock_guard<std::mutex> lock(mtx);
         gpsQueue.push_back(*gpsMsg);
+    }*/
+
+    
+    // This is a new gps handeler which directly subsribes to fix
+    void gpsHandler(const sensor_msgs::NavSatFixConstPtr& GPS_msg)
+    {
+     	std::lock_guard<std::mutex> lock(mtx);
+    	gpsQueue.push_back(*GPS_msg);
+    	//m_buf.unlock();
     }
 
     void pointAssociateToMap(PointType const * const pi, PointType * const po)
@@ -801,16 +826,19 @@ public:
     void updateInitialGuess()
     {        
         static Eigen::Affine3f lastImuTransformation;
+        
         // system initialization
         if (cloudKeyPoses3D->points.empty())
         {
             transformTobeMapped[0] = cloudInfo.imuRollInit;
             transformTobeMapped[1] = cloudInfo.imuPitchInit;
-            transformTobeMapped[2] = cloudInfo.imuYawInit;
-
+            transformTobeMapped[2] = cloudInfo.imuYawInit + ImuHeadingBias; // get from params
+            
+       
             if (!useImuHeadingInitialization)
-                transformTobeMapped[2] = 0;
+                transformTobeMapped[2] = 0 ;
 
+            cout << "using IMU heading bias :" << ImuHeadingBias << "|  initialized Yaw :" << transformTobeMapped[2] << endl;
             lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit); // save imu before return;
             return;
         }
@@ -851,6 +879,7 @@ public:
             odomResetId = cloudInfo.odomResetId;
         }
 
+        // oscar this is removed to improve stationary performance -  without this the algorithm fails
         // use imu incremental estimation for pose guess (only rotation)
         if (cloudInfo.imuAvailable == true)
         {
@@ -1382,7 +1411,8 @@ public:
         }
     }
 
-    void addGPSFactor()
+    // oscar: comment out for raw gps fix input update
+    /*void addGPSFactor()
     {
         if (gpsQueue.empty())
             return;
@@ -1458,6 +1488,182 @@ public:
                 break;
             }
         }
+    }*/
+
+    void GPS2XYZ(double latitude, double longitude, double altitude, double* xyz)
+    {
+    	if(!initGPS)
+    	{
+        	geoConverter.Reset(latitude, longitude, altitude);
+        	initGPS = true;
+    	}
+    	geoConverter.Forward(latitude, longitude, altitude, xyz[0], xyz[1], xyz[2]);
+    	//printf("la: %f lo: %f al: %f\n", latitude, longitude, altitude);
+    	//printf("gps x: %f y: %f z: %f\n", xyz[0], xyz[1], xyz[2]);
+    } 
+   
+    void addGPSFactor()
+    {
+        if (gpsQueue.empty())
+            return;
+
+        // wait for system initialized and settles down
+        if (cloudKeyPoses3D->points.empty())
+            return;
+        else if (pointDistance(cloudKeyPoses3D->front(), cloudKeyPoses3D->back()) < 5.0)
+                return;
+
+        // pose covariance small, no need to correct
+        if (poseCovariance(3,3) < poseCovThreshold && poseCovariance(4,4) < poseCovThreshold)
+            return;
+
+        // last gps position
+        static PointType lastGPSPoint;
+        double lastGPSTime = 0.0;
+
+        while (!gpsQueue.empty())
+        {
+            if (gpsQueue.front().header.stamp.toSec() < timeLaserInfoCur - 0.1)
+            {
+                // message too old
+                cout << "message old" << gpsQueue.front().header.stamp.toSec() - timeLaserInfoCur << endl;
+                gpsQueue.pop_front();
+            }
+            else if (gpsQueue.front().header.stamp.toSec() > timeLaserInfoCur + 0.1)
+            {
+                // message too new
+                cout << "message new" << gpsQueue.front().header.stamp.toSec() - timeLaserInfoCur << endl;
+                break;
+            }
+            else
+            {
+                sensor_msgs::NavSatFix thisGPS = gpsQueue.front();
+                gpsQueue.pop_front();
+
+                // GPS too noisy, skip
+                double latitude = thisGPS.latitude;
+            	double longitude = thisGPS.longitude;
+            	double altitude = thisGPS.altitude;
+                int fixstatus = thisGPS.status.status;  //this is 2 for rtk and 
+                double pos_accuracy = thisGPS.position_covariance[0];
+                float noise_x = thisGPS.position_covariance[0];
+                float noise_y = thisGPS.position_covariance[4];
+                float noise_z = thisGPS.position_covariance[8];
+            	if(noise_x <= 0 && fixstatus < 0){
+			continue;
+            	}
+                printf("synced %f| receive covariance %lf | fix status(2:RTK) %i \n",thisGPS.header.stamp.toSec() - timeLaserInfoCur, pos_accuracy, fixstatus); // use this to check gps sync errors
+                    
+
+		// get XYZ 
+                double xyz[3];
+		GPS2XYZ(latitude, longitude, altitude, xyz);
+                float gps_x=xyz[0];
+		float gps_y=xyz[1];
+                float gps_z=xyz[2];
+                   
+                if (!useGpsElevation)
+                {
+                    cout << "gps elevation not used" << endl;
+                    //gps_z = transformTobeMapped[5];
+                    //noise_z = 0.01;
+                }
+
+                // GPS not properly initialized (0,0,0)
+                if (abs(gps_x) < 1e-6 && abs(gps_y) < 1e-6)
+                    continue;
+
+                // Add GPS every a few meters
+                PointType curGPSPoint;
+                double curGPSTime = thisGPS.header.stamp.toSec();
+                curGPSPoint.x = gps_x;
+                curGPSPoint.y = gps_y;
+                curGPSPoint.z = gps_z;
+                if (pointDistance(curGPSPoint, lastGPSPoint) < 5.0 & (curGPSTime - lastGPSTime < 1.0))
+                    continue;
+                else
+                   { lastGPSPoint = curGPSPoint;
+	             lastGPSTime  = curGPSTime;}
+
+		
+	        cout << "************************GPS****************************" << endl;
+		cout << "gps location T_wGPS_body: "<< gps_x << ", " <<  gps_y << ", "  << gps_z << ", " << cloudKeyPoses3D->size() << endl;
+                cout << "odom location T_wGPS_body: "<< transformTobeMapped[3] << ", " <<  transformTobeMapped[4] << ", "  << transformTobeMapped[5] << ", " << cloudKeyPoses3D->size() << endl;
+		//make poses of the current gps points
+
+                geometry_msgs::PoseStamped pose_stamped;
+        	pose_stamped.header.stamp = thisGPS.header.stamp;
+        	pose_stamped.header.frame_id = "gps_world";
+        	pose_stamped.pose.position.x = gps_x;
+       	 	pose_stamped.pose.position.y = gps_y ;
+        	pose_stamped.pose.position.z = gps_z;
+        	tf::Quaternion q = tf::createQuaternionFromRPY(transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+        	pose_stamped.pose.orientation.x = q.x();
+        	pose_stamped.pose.orientation.y = q.y();
+        	pose_stamped.pose.orientation.z = q.z();
+        	pose_stamped.pose.orientation.w = q.w();
+
+        	GPSPath.poses.push_back(pose_stamped);
+
+
+                // yaw amount to add
+		/*Eigen::AngleAxisd rollAngle(0, Eigen::Vector3d::UnitZ());
+		Eigen::AngleAxisd yawAngle(0.6*M_PI), Eigen::Vector3d::UnitY());
+		Eigen::AngleAxisd pitchAngle(0, Eigen::Vector3d::UnitX());
+
+		Eigen::Quaternion<double> q_corr = rollAngle * yawAngle * pitchAngle;
+
+		Eigen::Matrix3d R_corr = q_corr.matrix();*/
+
+                // correct the GPS reference frame  
+                if (1) {
+                Eigen::Matrix4d WLVI_T_body   = Eigen::Matrix4d::Identity(); 
+            	Eigen::Matrix4d WGPS_T_body   = Eigen::Matrix4d::Identity();
+            	WLVI_T_body.block<3, 3>(0, 0) = Eigen::Quaterniond(q.w(), q.x(), q.y(), q.z()).toRotationMatrix();
+            	WLVI_T_body.block<3, 1>(0, 3) = Eigen::Vector3d(transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5]);
+            	WGPS_T_body.block<3, 3>(0, 0) = Eigen::Quaterniond(q.w(), q.x(), q.y(), q.z()).toRotationMatrix() ; // * R_corr add a yaw amount
+            	WGPS_T_body.block<3, 1>(0, 3) = Eigen::Vector3d(gps_x, gps_y, gps_z);
+            	WGPS_T_WLVI = WGPS_T_body * WLVI_T_body.inverse();}
+		//find T_WLVI_LVI
+                //find T_W_GPS_LVI
+                // find T_WGPS_WLVI
+
+                // publish the GPS reference frame
+                static tf2_ros::TransformBroadcaster brOpGPS;
+    		geometry_msgs::TransformStamped transformStampedG;
+    		transformStampedG.header.stamp = thisGPS.header.stamp;
+    		transformStampedG.header.frame_id = "gps_world";    //reference frame
+   		transformStampedG.child_frame_id = "odom";
+    		transformStampedG.transform.translation.x = WGPS_T_WLVI(0,3); //read & send the pos
+    		transformStampedG.transform.translation.y = WGPS_T_WLVI(1,3);
+    		transformStampedG.transform.translation.z = WGPS_T_WLVI(2,3);
+
+    		Eigen::Quaterniond q_upTemp;
+    		q_upTemp = Eigen::Quaterniond(WGPS_T_WLVI.block<3, 3>(0, 0));
+    		transformStampedG.transform.rotation.x = q_upTemp.x();
+    		transformStampedG.transform.rotation.y = q_upTemp.y();
+    		transformStampedG.transform.rotation.z = q_upTemp.z();
+    		transformStampedG.transform.rotation.w = q_upTemp.w();
+
+    		//static_broadcaster.sendTransform(static_transformStamped);
+    		brOpGPS.sendTransform(transformStampedG);
+                
+		//publish path and visualize -  k update every 5 poses only
+		//update the gps world frame
+                    
+		//draw marker array for update
+                 
+                /*gtsam::Vector Vector3(3);
+                Vector3 << max(noise_x, 1.0f), max(noise_y, 1.0f), max(noise_z, 1.0f);
+                noiseModel::Diagonal::shared_ptr gps_noise = noiseModel::Diagonal::Variances(Vector3);
+                gtsam::GPSFactor gps_factor(cloudKeyPoses3D->size(), gtsam::Point3(gps_x, gps_y, gps_z), gps_noise);
+                gtSAMgraph.add(gps_factor);
+
+                aLoopIsClosed = false; */ /// theres a bug here
+
+                break;
+            }
+        }
     }
 
     void addLoopFactor()
@@ -1489,7 +1695,7 @@ public:
         addOdomFactor();
 
         // gps factor
-        // addGPSFactor();
+        addGPSFactor();
 
         // loop factor
         addLoopFactor();
@@ -1658,6 +1864,14 @@ public:
             globalPath.header.stamp = timeLaserInfoStamp;
             globalPath.header.frame_id = "odom";
             pubPath.publish(globalPath);
+        }
+
+ 	// publish path
+        if (pubGPSPath.getNumSubscribers() != 0)
+        {
+            GPSPath.header.stamp = timeLaserInfoStamp;
+            GPSPath.header.frame_id = "gps_world";
+            pubGPSPath.publish(GPSPath);
         }
     }
 };

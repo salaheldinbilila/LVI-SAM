@@ -1,0 +1,19 @@
+<launch>
+
+    <!-- GPS nodes -->
+    <node pkg="robot_localization" type="navsat_transform_node" name="navsat_transform_node" respawn="true">
+
+    <param name="magnetic_declination_radians" value="0"/>
+
+    <param name="yaw_offset" value="0"/>
+
+    <param name="broadcast_cartesian_transform" value="true"/>
+    <param name="publish_filtered_gps" value="true"/>
+
+    <remap from="/imu/data" to="/imu/data" />
+    <remap from="/gps/fix" to="/fix" />
+    <remap from="/odometry/filtered" to="/lvi_sam/vins/odometry/odometry" />
+
+  </node>
+
+</launch>
