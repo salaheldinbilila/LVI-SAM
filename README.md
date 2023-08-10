@@ -11,14 +11,10 @@ This repository contains code for a lidar-visual-inertial odometry and mapping s
 ## Dependency
 
 - [ROS](http://wiki.ros.org/ROS/Installation) (Tested with kinetic and melodic)
-- [gtsam](https://github.com/borglab/gtsam/releases) (Georgia Tech Smoothing and Mapping library)
+- [gtsam](https://gtsam.org/get_started/) (Georgia Tech Smoothing and Mapping library)
   ```
-  wget -O ~/Downloads/gtsam.zip https://github.com/borglab/gtsam/archive/4.0.2.zip
-  cd ~/Downloads/ && unzip gtsam.zip -d ~/Downloads/
-  cd ~/Downloads/gtsam-4.0.2/
-  mkdir build && cd build
-  cmake -DGTSAM_BUILD_WITH_MARCH_NATIVE=OFF ..
-  sudo make install -j4
+  sudo add-apt-repository ppa:borglab/gtsam-release-4.0
+  sudo apt install libgtsam-dev libgtsam-unstable-dev
   ```
 - [Ceres](https://github.com/ceres-solver/ceres-solver/releases) (C++ library for modeling and solving large, complicated optimization problems)
   ```
@@ -31,6 +27,11 @@ This repository contains code for a lidar-visual-inertial odometry and mapping s
   cmake ..
   sudo make install -j4
   ```
+
+### Getting start with Docker  
+
+When you use Docker, you could solve the dependency at once.  
+For more information, you can check [docker_start.md](./docker/docker_start.md).    
 
 ---
 
@@ -66,6 +67,8 @@ https://drive.google.com/drive/folders/1q2NZnsgNmezFemoxhHnrDnp1JV_bqrgV?usp=sha
     <img src="./doc/handheld-earth.png" alt="drawing" width="328"/>
 </p>
 
+**New:** more datasets are available at [LVI-SAM-Easyused](https://github.com/Cc19245/LVI-SAM-Easyused).
+
 ---
 
 ## Run the package
@@ -88,6 +91,14 @@ rosbag play handheld.bag
 
 ---
 
+## Related Packages
+
+  - [LVI_SAM_fixed by epicjung](https://github.com/epicjung/LVI_SAM_fixed)
+  - [LVI-SAM-modified by skyrim835](https://github.com/skyrim835/LVI-SAM-modified)
+  - [LVI-SAM-Easyused by Cc19245](https://github.com/Cc19245/LVI-SAM-Easyused)
+
+---
+
 ## TODO
 
   - [ ] Update graph optimization using all three factors in imuPreintegration.cpp, simplify mapOptimization.cpp, increase system stability 
@@ -103,7 +114,7 @@ Thank you for citing our [paper](./doc/paper.pdf) if you use any of this code or
   title={LVI-SAM: Tightly-coupled Lidar-Visual-Inertial Odometry via Smoothing and Mapping},
   author={Shan, Tixiao and Englot, Brendan and Ratti, Carlo and Rus Daniela},
   booktitle={IEEE International Conference on Robotics and Automation (ICRA)},
-  pages={to-be-added},
+  pages={5692-5698},
   year={2021},
   organization={IEEE}
 }
