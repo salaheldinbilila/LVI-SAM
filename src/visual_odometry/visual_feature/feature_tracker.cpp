@@ -28,9 +28,32 @@ void reduceVector(vector<int> &v, vector<uchar> status)
     v.resize(j);
 }
 
+void reduceVector(vector<uchar> &v, vector<uchar> status)
+{
+    int j = 0;
+    for (int i = 0; i < int(v.size()); i++)
+        if (status[i])
+            v[j++] = v[i];
+    v.resize(j);
+}
+
 
 FeatureTracker::FeatureTracker()
 {
+    seg_reject_flag.clear();
+    det_reject_flag.clear();
+    /*
+    if (SEG)
+    {
+        seg_reject_flag.resize(MAX_CNT);
+        fill(seg_reject_flag.begin(),seg_reject_flag.end(),0);
+    }
+    if (DET)
+    {
+        seg_reject_flag.resize(MAX_CNT);
+        fill(seg_reject_flag.begin(),seg_reject_flag.end(),0);
+    }
+    */
 }
 
 void FeatureTracker::setMask()
@@ -68,12 +91,56 @@ void FeatureTracker::setMask()
     }
 }
 
+void FeatureTracker::setMaskMod()
+{
+    //mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+    if (DET)
+        mask = car_mask.clone();
+
+    // prefer to keep features that are tracked for long time
+    vector<pair<pair<int, pair<cv::Point2f, int>>, pair<uchar,uchar>>> cnt_pts_id;
+    for (unsigned int i = 0; i < forw_pts.size(); i++)
+        cnt_pts_id.push_back(make_pair(make_pair(track_cnt[i], make_pair(forw_pts[i], ids[i])), make_pair(seg_reject_flag[i],det_reject_flag[i])));
+
+    sort(cnt_pts_id.begin(), cnt_pts_id.end(), [](const pair<pair<int, pair<cv::Point2f, int>>, pair<uchar,uchar>> &a, const pair<pair<int, pair<cv::Point2f, int>>, pair<uchar,uchar>> &b)
+         { return a.first.first > b.first.first; });
+
+    forw_pts.clear();
+    ids.clear();
+    track_cnt.clear();
+    seg_reject_flag.clear();
+    det_reject_flag.clear();
+
+    for (auto &it : cnt_pts_id)
+    {
+        if (mask.at<uchar>(it.first.second.first) == 255)
+        {
+            forw_pts.push_back(it.first.second.first);
+            ids.push_back(it.first.second.second);
+            track_cnt.push_back(it.first.first);
+            seg_reject_flag.push_back(it.second.first);
+            det_reject_flag.push_back(it.second.second);
+            cv::circle(mask, it.first.second.first, MIN_DIST, 0, -1);
+        }
+    }
+}
+
+
+double FeatureTracker::distance(cv::Point2f &pt1, cv::Point2f &pt2)
+{
+    // printf("pt1: %f %f pt2: %f %f\n", pt1.x, pt1.y, pt2.x, pt2.y);
+    double dx = pt1.x - pt2.x;
+    double dy = pt1.y - pt2.y;
+    return sqrt(dx * dx + dy * dy);
+}
+
+
 void FeatureTracker::addPoints()
 {
     for (auto &p : n_pts)
     {
         forw_pts.push_back(p);
-        ids.push_back(-1);
+        ids.push_back(n_id++);
         track_cnt.push_back(1);
     }
 }
@@ -112,6 +179,21 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         vector<float> err;
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
 
+        
+        // flow back
+        vector<uchar> reverse_status;
+        vector<cv::Point2f> reverse_pts = cur_pts;
+        cv::calcOpticalFlowPyrLK(forw_img, cur_img, forw_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 1,
+                                   cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 30, 0.01), cv::OPTFLOW_USE_INITIAL_FLOW);
+    
+        for (size_t i = 0; i < status.size(); i++)
+        {
+            if (status[i] && reverse_status[i] && distance(cur_pts[i], reverse_pts[i]) <= 0.5)
+                status[i] = 1;
+            else
+                status[i] = 0;
+        }
+        
         for (int i = 0; i < int(forw_pts.size()); i++)
             if (status[i] && !inBorder(forw_pts[i]))
                 status[i] = 0;
@@ -121,18 +203,26 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         reduceVector(ids, status);
         reduceVector(cur_un_pts, status);
         reduceVector(track_cnt, status);
+        if(SEG || DET)
+        {
+            reduceVector(seg_reject_flag, status);
+            reduceVector(det_reject_flag, status);
+        }
         ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
     }
 
     for (auto &n : track_cnt)
         n++;
 
-    if (PUB_THIS_FRAME)
+    if (1)//(PUB_THIS_FRAME)
     {
-        rejectWithF();
+        // rejectWithF();
         ROS_DEBUG("set mask begins");
         TicToc t_m;
-        setMask();
+        if (SEG || DET)
+            setMaskMod();
+        else
+            setMask();
         ROS_DEBUG("set mask costs %fms", t_m.toc());
 
         ROS_DEBUG("detect feature begins");
@@ -151,11 +241,38 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         else
             n_pts.clear();
         ROS_DEBUG("detect feature costs: %fms", t_t.toc());
+        //  segmentation implementation
+        //ROS_INFO("Reject Mask");
+        if (SEG && !seg_img.empty())
+        {
+            reject_mask(seg_img,seg_classes,seg_reject_flag);
+        }
+        //  detection implementation
+        if (DET && !det_img.empty())
+        {
+            reject_mask(det_img,det_classes,det_reject_flag);
+        }
 
         ROS_DEBUG("add feature begins");
         TicToc t_a;
         addPoints();
         ROS_DEBUG("selectFeature costs: %fms", t_a.toc());
+        if (SEG || DET)
+        {
+            if(seg_reject_flag.size() != forw_pts.size())
+            {
+                //ROS_INFO("fill up");
+                seg_reject_flag.resize(forw_pts.size());
+                fill(seg_reject_flag.begin(),seg_reject_flag.end(),0);
+            }
+        
+            if(det_reject_flag.size() != forw_pts.size())
+            {
+                //ROS_INFO("fill up");
+                det_reject_flag.resize(forw_pts.size());
+                fill(det_reject_flag.begin(),det_reject_flag.end(),0);
+            }
+        }
     }
     prev_img = cur_img;
     prev_pts = cur_pts;
@@ -164,6 +281,13 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     cur_pts = forw_pts;
     undistortedPoints();
     prev_time = cur_time;
+
+    if (SHOW_TRACK)
+        drawTrack(cur_img);
+
+    prev_pts_map.clear();
+    for (size_t i = 0; i < cur_pts.size(); i++)
+        prev_pts_map[ids[i]] = cur_pts[i];
 }
 
 void FeatureTracker::rejectWithF()
@@ -198,6 +322,45 @@ void FeatureTracker::rejectWithF()
         reduceVector(track_cnt, status);
         ROS_DEBUG("FM ransac: %d -> %lu: %f", size_a, forw_pts.size(), 1.0 * forw_pts.size() / size_a);
         ROS_DEBUG("FM ransac costs: %fms", t_f.toc());
+    }
+}
+
+// Segmentation & Detection method
+void FeatureTracker::reject_mask(const cv::Mat _img, const vector<uchar> classes, vector<uchar>& reject_flag)
+{
+    uchar val,flag;
+    //reject_flag.clear();
+    // old points
+    for (int i = 0; i < int(forw_pts.size()); i++)
+    {
+        if (reject_flag[i] == 0)
+        {
+            val = _img.at<uchar>(forw_pts[i]);
+            for (auto it : classes)
+            {
+                if (val == it)
+                {
+                    reject_flag[i] = 1;
+                    break;
+                }
+            }
+        }
+    }
+    // new points
+    for (int i = 0; i < int(n_pts.size()); i++)
+    {
+        flag = 0;
+        //printf("current point: %f,%f\n",cur_pts[i].y,cur_pts[i].x);
+        val = _img.at<uchar>(n_pts[i]);
+        for (auto it : classes)
+        {
+            if (val == it)
+            {
+                flag = 1;
+                break;
+            }
+        }
+        reject_flag.push_back(flag);
     }
 }
 
@@ -255,6 +418,38 @@ void FeatureTracker::showUndistortion(const string &name)
     cv::waitKey(0);
 }
 
+void FeatureTracker::drawTrack(const cv::Mat &image)
+{
+    cv::cvtColor(image, imTrack, CV_GRAY2RGB);
+
+    for (unsigned int j = 0; j < cur_pts.size(); j++)
+    {
+        
+            // track count
+            //double len = std::min(1.0, 1.0 * trackerData[i].track_cnt[j] / WINDOW_SIZE);
+            //cv::circle(tmp_img, trackerData[i].cur_pts[j], 4, cv::Scalar(255 * (1 - len), 255 * len, 0), 4);
+
+            if((SEG||DET) && (seg_reject_flag[j] || det_reject_flag[j]))
+            {
+                cv::circle(imTrack, cur_pts[j], 5, cv::Scalar(0, 255, 0), 5);
+            }
+            else
+            {
+                double len = std::min(1.0, 1.0 * track_cnt[j] / WINDOW_SIZE);
+                cv::circle(imTrack, cur_pts[j], 3, cv::Scalar(255 * (1 - len), 0, 255 * len), 3);
+            }
+    }
+    map<int, cv::Point2f>::iterator mapIt;
+    for (size_t i = 0; i < ids.size(); i++)
+    {
+        mapIt = prev_pts_map.find(ids[i]);
+        if (mapIt != prev_pts_map.end())
+        {
+            cv::arrowedLine(imTrack, cur_pts[i], mapIt->second, cv::Scalar(0, 255, 0), 1, 8, 0, 0.2);
+        }
+    }
+}
+
 void FeatureTracker::undistortedPoints()
 {
     cur_un_pts.clear();
@@ -303,4 +498,9 @@ void FeatureTracker::undistortedPoints()
         }
     }
     prev_un_pts_map = cur_un_pts_map;
+}
+
+cv::Mat FeatureTracker::getTrackImage()
+{
+    return imTrack;
 }

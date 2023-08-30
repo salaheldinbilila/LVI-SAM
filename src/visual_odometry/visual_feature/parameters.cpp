@@ -34,6 +34,11 @@ int USE_LIDAR;
 int USE_DENSE_CLOUD;
 int LIDAR_SKIP;
 
+int SEG;       // segmentation flag
+int DET;       // detection flag
+std::vector<uchar> seg_classes = {GRASS};   // segmentation classes
+std::vector<uchar> det_classes= {CAR,BUS,PERSON,TRUCK};     //detection classes
+std::string CAR_MASK,BUS_MASK;           //car mask and bus mask file names
 
 void readParameters(ros::NodeHandle &n)
 {
@@ -49,6 +54,9 @@ void readParameters(ros::NodeHandle &n)
     fsSettings["project_name"] >> PROJECT_NAME;
     std::string pkg_path = ros::package::getPath(PROJECT_NAME);
 
+    int pn = config_file.find_last_of('/');
+    std::string configPath = config_file.substr(0, pn);
+
     // sensor topics
     fsSettings["image_topic"]       >> IMAGE_TOPIC;
     fsSettings["imu_topic"]         >> IMU_TOPIC;
@@ -58,6 +66,12 @@ void readParameters(ros::NodeHandle &n)
     fsSettings["use_lidar"] >> USE_LIDAR;
     fsSettings["use_dense_cloud"] >> USE_DENSE_CLOUD;
     fsSettings["lidar_skip"] >> LIDAR_SKIP;
+
+    // Segmentation and detection flags
+    SEG = fsSettings["seg"];            // extract segmentation parameter from settings file
+    DET = fsSettings["det"];            // extract detect ionparameter from settings file
+    printf("DET: %d\n",DET);
+    printf("SEG: %d\n",SEG);
 
     // feature and image settings
     MAX_CNT = fsSettings["max_cnt"];
@@ -84,6 +98,17 @@ void readParameters(ros::NodeHandle &n)
         std::string mask_name;
         fsSettings["fisheye_mask"] >> mask_name;
         FISHEYE_MASK = pkg_path + mask_name;
+    }
+
+    //car mask and bus mask
+    if (DET)
+    {
+        std::string car_mask_file,bus_mask_file;
+        fsSettings["bus_mask"] >> bus_mask_file;
+        fsSettings["car_mask"] >> car_mask_file;
+        BUS_MASK = configPath + "/" + bus_mask_file;
+        CAR_MASK = configPath + "/" + car_mask_file;
+        //printf("CAR_MASK: %s\n",CAR_MASK.c_str());
     }
 
     // camera config

@@ -57,6 +57,14 @@
 #include <mutex>
 #include <cassert>
 
+// Segmentation/detection classes to their respective numbering list
+#define PAVED 1
+#define GRASS 3
+#define CAR 17
+#define BUS 23
+#define TRUCK 24
+#define PERSON 15
+
 using namespace std;
 
 typedef pcl::PointXYZI PointType;
@@ -98,6 +106,11 @@ extern double L_C_RY;
 extern double L_C_RZ;
 
 
+extern int SEG;                                 //segmentation flag
+extern int DET;                                 //detection flag
+extern std::vector<uchar> seg_classes;          //segmentation classes
+extern std::vector<uchar> det_classes;          //detection classes
+extern std::string CAR_MASK,BUS_MASK;           //car mask and bus mask file names
 
 
 void readParameters(ros::NodeHandle &n);

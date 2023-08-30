@@ -34,6 +34,11 @@ class FeatureTracker
 
     void setMask();
 
+    void setMaskMod();  //modified setMask
+
+    double distance(cv::Point2f &pt1, cv::Point2f &pt2);
+
+
     void addPoints();
 
     bool updateID(unsigned int i);
@@ -46,9 +51,19 @@ class FeatureTracker
 
     void undistortedPoints();
 
+    void reject_mask(const cv::Mat _img, const vector<uchar> classes, vector<uchar>& reject_flag);  //rejection function
+
+    cv::Mat getTrackImage();
+
+    void drawTrack(const cv::Mat &image);
+
+    cv::Mat imTrack;
     cv::Mat mask;
     cv::Mat fisheye_mask;
     cv::Mat prev_img, cur_img, forw_img;
+    cv::Mat seg_img, det_img;     // segmentation & detection image passing
+    cv::Mat car_mask, bus_mask;     // masks
+    vector<uchar> seg_reject_flag, det_reject_flag;     // flags
     vector<cv::Point2f> n_pts;
     vector<cv::Point2f> prev_pts, cur_pts, forw_pts;
     vector<cv::Point2f> prev_un_pts, cur_un_pts;
@@ -57,6 +72,7 @@ class FeatureTracker
     vector<int> track_cnt;
     map<int, cv::Point2f> cur_un_pts_map;
     map<int, cv::Point2f> prev_un_pts_map;
+    map<int, cv::Point2f> prev_pts_map;
     camodocal::CameraPtr m_camera;
     double cur_time;
     double prev_time;
