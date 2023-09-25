@@ -326,7 +326,8 @@ public:
             imageShowPointer->header.stamp = stamp_cur;
             pub_depth_image.publish(imageShowPointer);
         }
-
+        // disable depth but keep the visuals
+        //depth_of_point.values.resize(features_2d.size(), -1);
         return depth_of_point;
     }
 

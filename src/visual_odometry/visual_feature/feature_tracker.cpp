@@ -214,7 +214,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     for (auto &n : track_cnt)
         n++;
 
-    if (1)//(PUB_THIS_FRAME)
+    if (1) //(PUB_THIS_FRAME)
     {
         // rejectWithF();
         ROS_DEBUG("set mask begins");

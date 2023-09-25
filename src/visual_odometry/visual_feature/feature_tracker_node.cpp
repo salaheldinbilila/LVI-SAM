@@ -2,7 +2,7 @@
 
 #define SHOW_UNDISTORTION 0
 
-#define time_out_count 10
+#define time_out_count 25
 
 // mtx lock for two threads
 std::mutex mtx_lidar;
@@ -368,8 +368,8 @@ void sync_process()
         {
             time = img_buf.front()->header.stamp.toSec();
             img_header = img_buf.front()->header;
-            ROS_INFO("Image time: %f",time);
-            /*
+            //printf("Image time: %f\n",time);
+            
             if(first_image_flag)
             {
                 first_image_flag = false;
@@ -392,6 +392,7 @@ void sync_process()
                 continue;
             }
             last_image_time = time;
+            /*
             // frequency control
             if (round(1.0 * pub_count / (time - first_image_time)) <= FREQ)
             {
@@ -455,22 +456,22 @@ void sync_process()
                 {
                     empty_count = 0;
                     det_time = det_buf.front()->header.stamp.toSec();
-                    ROS_INFO("detection time: %f",det_time);
-                    ROS_INFO("detection time diff: %f",det_time-time);
+                    //printf("detection time: %f\n",det_time);
+                    //printf("detection time diff: %f\n",det_time-time);
                     if (det_time < time)
                     {
-                        ROS_INFO("The detection is of an old image, discard");
+                        //printf("The detection is of an old image, discard\n");
                         det_buf.pop();
                     }
                     else if (det_time > time)
                     {
-                        ROS_INFO("Image too late. Use image without detection");
+                        //printf("Image too late. Use image without detection\n");
                         image = getImageFromMsg(img_buf.front());
                         img_buf.pop();
                     }
                     else //(det_time == time)
                     {
-                        ROS_INFO("Images match, process both");
+                        //printf("Images match, process both\n");
                         image = getImageFromMsg(img_buf.front());
                         img_buf.pop();
                         trackerData.det_img = getImageFromMsg(det_buf.front());
@@ -480,14 +481,16 @@ void sync_process()
                 else
                 {
                     empty_count++;
-                    ROS_INFO("Detection buffer empty, count: %d",empty_count);
+                    //printf("Detection buffer empty, count: %d\n",empty_count);
+                    
                     if (empty_count == time_out_count)
                     {
                         empty_count = 0;
-                        ROS_INFO("Buffer still empty. Use image without detection");
+                        //printf("Buffer still empty. Use image without detection\n");
                         image = getImageFromMsg(img_buf.front());
                         img_buf.pop();
                     }
+                    
                 }
             }
             else
@@ -500,7 +503,7 @@ void sync_process()
         if(!image.empty())
         {
             trackerData.readImage(image, time);
-            if (1) //(PUB_THIS_FRAME)
+            if (1)//(PUB_THIS_FRAME)
             {
                 pub_count++;
                 sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);
@@ -765,13 +768,9 @@ int main(int argc, char **argv)
     ros::Subscriber sub_seg;
     ros::Subscriber sub_det;
     if(SEG)
-    {
         sub_seg = n.subscribe("/semantic", 100, seg_callback);      // segmentation subscriber
-    }
     if(DET)
-    {
         sub_det = n.subscribe("/detect", 100, det_callback);      // detection subscriber
-    }
     //ros::Subscriber sub_lidar_raw = n.subscribe("/velodyne_points", 5,    lidar_raw_callback);
     if (!USE_LIDAR)
         sub_lidar.shutdown();
